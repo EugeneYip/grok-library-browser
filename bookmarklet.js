@@ -1,4 +1,4 @@
-// Full-screen vertical Reels gallery with better error reporting
+// Full-screen vertical Reels gallery — robust URL extraction + diagnostics
 (function(){
   if (document.getElementById('grok-reels-fullscreen')) return;
   const ASSETS_ENDPOINT = 'https://grok.com/rest/assets';
@@ -34,8 +34,8 @@
         #grok-reels-fullscreen .close { margin-left: auto; background: transparent; border: none; color: #aaa; font-size: 22px; cursor: pointer; }
         #grok-reels-fullscreen .status { font-size: 12px; color: #aaa; padding: 8px 20px; }
         #grok-reels-fullscreen .debug {
-          font-size: 11px; color: #f87171; padding: 0 20px 8px; white-space: pre-wrap; word-break: break-all;
-          max-height: 80px; overflow: auto; background: #1a0a0a;
+          font-size: 11px; color: #fbbf24; padding: 0 20px 8px; white-space: pre-wrap; word-break: break-all;
+          max-height: 120px; overflow: auto; background: #1a1400;
         }
         #grok-reels-fullscreen .grid {
           flex: 1; overflow-y: auto; padding: 16px 20px 40px;
@@ -108,7 +108,41 @@
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
-    return { ok: res.ok, status: res.status, json, text: text.slice(0, 500) };
+    return { ok: res.ok, status: res.status, json, text: text.slice(0, 800) };
+  }
+
+  function extractUrl(item) {
+    if (!item || typeof item !== 'object') return '';
+    // Direct fields
+    const direct = item.url || item.imageUrl || item.videoUrl || item.mediaUrl || item.src || item.href || item.fileUrl || item.assetUrl;
+    if (direct && typeof direct === 'string' && direct.startsWith('http')) return direct;
+    // Nested common patterns
+    if (item.media && typeof item.media === 'object') {
+      const m = item.media.url || item.media.src || item.media.href;
+      if (m && typeof m === 'string') return m;
+    }
+    if (item.asset && typeof item.asset === 'object') {
+      const a = item.asset.url || item.asset.src;
+      if (a && typeof a === 'string') return a;
+    }
+    // Storage key variants
+    const key = item.storageKey || item.key || item.fileKey || item.assetKey || item.storage_key;
+    if (key && typeof key === 'string') return `https://assets.grok.com/${key}`;
+    return '';
+  }
+
+  function isVideo(item, url) {
+    if (!url) return false;
+    return /\.(mp4|webm|mov|m4v)/i.test(url) || item.type === 'video' || item.mediaType === 'video' || item.kind === 'video' || item.media_type === 'video';
+  }
+
+  function getFilename(url, isVid) {
+    try {
+      const u = new URL(url);
+      let name = u.pathname.split('/').pop() || 'grok-media';
+      if (!/\.(jpg|jpeg|png|webp|gif|mp4|webm|mov)/i.test(name)) name += isVid ? '.mp4' : '.jpg';
+      return name;
+    } catch { return isVid ? 'grok-video.mp4' : 'grok-image.jpg'; }
   }
 
   async function loadAll() {
@@ -117,49 +151,39 @@
     allItems = []; selected.clear();
     setDebug('');
 
-    // Try primary payload first
     let result = await tryFetch({ limit: PAGE_SIZE, workspace: WORKSPACE });
     if (!result.ok) {
-      setDebug(`Primary failed ${result.status}: ${result.text}`);
-      // Fallback: no workspace filter
+      setDebug(`Primary ${result.status}: ${result.text}`);
       result = await tryFetch({ limit: PAGE_SIZE });
       if (!result.ok) {
-        setDebug(`Fallback also failed ${result.status}: ${result.text}`);
-        status.textContent = 'Could not load library (see red text above)';
+        setDebug(`Fallback ${result.status}: ${result.text}`);
+        status.textContent = 'Request failed — see yellow text';
         return;
       }
     }
 
     const data = result.json || {};
-    const items = data.assets || data.items || data.posts || data.results || [];
-    if (!Array.isArray(items) || items.length === 0) {
-      setDebug('Response had no items. Keys: ' + Object.keys(data).join(', ') + '\n' + JSON.stringify(data).slice(0, 400));
-      status.textContent = 'Empty response from server';
+    let items = data.assets || data.items || data.posts || data.results || data.data || [];
+    if (!Array.isArray(items)) items = [];
+
+    if (items.length === 0) {
+      setDebug('No array found. Top-level keys: ' + Object.keys(data).join(', ') + '\nSnippet: ' + JSON.stringify(data).slice(0, 600));
+      status.textContent = 'Empty response';
       return;
     }
 
     allItems = items;
-    // Simple single-page for now; pagination can be added once shape is confirmed
-    status.textContent = `${allItems.length} items loaded`;
-    setDebug('');
+    // Check how many have extractable URLs
+    const withUrl = allItems.filter(it => extractUrl(it)).length;
+    if (withUrl === 0) {
+      const sample = allItems[0];
+      setDebug('Loaded ' + allItems.length + ' items but none have a recognizable URL.\nFirst item keys: ' + Object.keys(sample || {}).join(', ') + '\nFirst item: ' + JSON.stringify(sample).slice(0, 700));
+      status.textContent = allItems.length + ' items received, 0 with usable media URL';
+    } else {
+      setDebug('');
+      status.textContent = withUrl + ' of ' + allItems.length + ' items have media';
+    }
     filterAndRender();
-  }
-
-  function getUrl(item) {
-    return item.url || item.imageUrl || item.videoUrl || item.mediaUrl ||
-           (item.storageKey ? `https://assets.grok.com/${item.storageKey}` : '') ||
-           (item.key ? `https://assets.grok.com/${item.key}` : '');
-  }
-  function isVideo(item, url) {
-    return /\.(mp4|webm|mov|m4v)/i.test(url) || item.type === 'video' || item.mediaType === 'video' || item.kind === 'video';
-  }
-  function getFilename(url, isVid) {
-    try {
-      const u = new URL(url);
-      let name = u.pathname.split('/').pop() || 'grok-media';
-      if (!/\.(jpg|jpeg|png|webp|gif|mp4|webm|mov)/i.test(name)) name += isVid ? '.mp4' : '.jpg';
-      return name;
-    } catch { return isVid ? 'grok-video.mp4' : 'grok-image.jpg'; }
   }
 
   function updateDownloadBtn() {
@@ -178,9 +202,9 @@
     if (selected.size === 0) return;
     downloadBtn.disabled = true;
     downloadBtn.textContent = 'Downloading…';
-    const toDownload = filtered.filter(item => selected.has(item.id || getUrl(item)));
+    const toDownload = filtered.filter(item => selected.has(item.id || extractUrl(item)));
     for (const item of toDownload) {
-      const url = getUrl(item);
+      const url = extractUrl(item);
       if (!url) continue;
       const video = isVideo(item, url);
       const filename = getFilename(url, video);
@@ -204,7 +228,7 @@
     const q = (searchInput.value || '').toLowerCase();
     const mode = filterSelect.value;
     filtered = allItems.filter(item => {
-      const url = getUrl(item);
+      const url = extractUrl(item);
       if (!url) return false;
       const prompt = (item.prompt || item.text || item.caption || '').toLowerCase();
       if (q && !prompt.includes(q)) return false;
@@ -219,11 +243,11 @@
   function renderGrid() {
     grid.innerHTML = '';
     if (filtered.length === 0) {
-      status.textContent = allItems.length ? 'No items match the current filter/search' : 'No items loaded';
+      status.textContent = (status.textContent.includes('items') ? status.textContent : '0 shown');
       return;
     }
     filtered.slice(0, 300).forEach(item => {
-      const url = getUrl(item);
+      const url = extractUrl(item);
       if (!url) return;
       const id = item.id || url;
       const div = document.createElement('div');
@@ -252,7 +276,7 @@
       div.ondblclick = (e) => { e.stopPropagation(); window.open(url, '_blank'); };
       grid.appendChild(div);
     });
-    status.textContent = `${filtered.length} shown` + (filtered.length < allItems.length ? ` (of ${allItems.length})` : '');
+    status.textContent = filtered.length + ' shown' + (filtered.length < allItems.length ? ' (of ' + allItems.length + ')' : '');
     updateDownloadBtn();
   }
 
