@@ -1,23 +1,18 @@
-# Grok Library Browser
+# Grok Reels Library
 
-A clean Tampermonkey userscript that adds a better grid + search interface for browsing your Grok generated images and videos.
+Pure browser bookmarklet for browsing and downloading your vertical (9:16) Grok generations.
 
-## Install
+**Install page:** https://eugeneyip.github.io/grok-library-browser/
 
-1. Install [Tampermonkey](https://www.tampermonkey.net/) (or Violentmonkey).
-2. Open Tampermonkey → Create a new script.
-3. Replace the contents with the code from [`grok-library-browser.user.js`](./grok-library-browser.user.js).
-4. Save.
-5. Go to [grok.com/library](https://grok.com/library) or [grok.com/imagine](https://grok.com/imagine).
+No extension required. Drag the button on the install page to your bookmarks bar, then click it while on grok.com/library.
 
-A floating panel and a launcher button will appear. Search by prompt, click items to open them.
+## Features
+- 9:16 vertical grid optimized for Reels content
+- Search by prompt
+- Image / Video filter
+- Multi-select + download selected files
+- Works entirely in the browser with your existing login session
 
-## Notes
-
-- Uses your existing logged-in session (cookies).
-- Fetches from Grok’s `/rest/assets` endpoint.
-- Internal endpoints can change; if it stops working, open an issue.
-
-## License
-
-MIT
+Source files:
+- `index.html` — install page
+- `bookmarklet.js` — the bookmarklet source
