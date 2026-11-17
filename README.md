@@ -10,4 +10,4 @@ The bookmark runs on [https://grok.com/library](https://grok.com/library) using 
 
 Related videos are grouped into a cycle row when the post record has `originalPostId` or the assets share `rootAssetId`. Selection is only for download. Playback does not require a click.
 
-A bookmark is a copy of the script at the moment you drag it. After each update, delete the old bookmark and drag the button from the install page again. The header must say **Reels Library v3**.
+The header must say **Reels Library v4**. Video tiles use Grok’s preview image when it exists, and otherwise show a still frame from the file so you can select without opening each one. Hover a video to play it.

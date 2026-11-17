@@ -1,4 +1,4 @@
-// v3 — same GET the Imagine library uses. Full-screen 9:16 scan.
+// v4 — video stills from preview-image keys, then a decoded frame.
 (function () {
   if (window.__grokReelsLoading && document.getElementById('grok-reels-fullscreen')) return;
   window.__grokReelsLoading = true;
@@ -15,7 +15,6 @@
   var byId = {};
   var selected = {};
   var ui = {};
-  var playing = 0;
   var io;
   var rendered = 0;
 
@@ -47,17 +46,46 @@
     return '';
   }
 
+  function postersFrom(asset) {
+    var aux = asset.auxKeys || {};
+    var list = [
+      aux['preview-image-256'],
+      aux.preview_image_256,
+      asset.previewImageKey,
+      aux['preview-image'],
+      aux.preview_image,
+      aux.thumbnail,
+      aux.thumbnailImageUrl
+    ];
+    var k;
+    for (k in aux) {
+      if (!Object.prototype.hasOwnProperty.call(aux, k)) continue;
+      if (typeof aux[k] === 'string' && /preview|thumb|poster/i.test(k)) list.push(aux[k]);
+    }
+    var i, seen = {}, out = [];
+    for (i = 0; i < list.length; i++) {
+      var url = mediaUrl(list[i]);
+      if (url && !seen[url]) {
+        seen[url] = 1;
+        out.push(url);
+      }
+    }
+    return out;
+  }
+
   function addAsset(asset) {
     if (!asset || asset.isDeleted || !asset.assetId) return;
     var kind = kindOf(asset);
     var url = mediaUrl(asset.key);
     if (!kind || !url) return;
     if (byId[asset.assetId]) return;
+    var posters = postersFrom(asset);
     var item = {
       id: asset.assetId,
       kind: kind,
       url: url,
-      poster: mediaUrl(asset.previewImageKey),
+      poster: posters[0] || '',
+      posters: posters,
       text: asset.summary || asset.name || '',
       time: asset.createTime || asset.lastUseTime || '',
       root: asset.rootAssetId || asset.assetId,
@@ -128,25 +156,36 @@
     check.textContent = selected[it.id] ? '\u2713' : '';
     card.appendChild(check);
     if (it.kind === 'video') {
-      if (it.poster) {
-        var poster = document.createElement('img');
-        poster.src = it.poster;
-        poster.alt = '';
-        card.appendChild(poster);
-      }
       var video = document.createElement('video');
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
       video.preload = 'none';
       video.dataset.src = it.url;
-      if (it.poster) video.poster = it.poster;
       card.appendChild(video);
+      if (it.poster) {
+        var poster = document.createElement('img');
+        poster.className = 'poster';
+        poster.alt = '';
+        var pi = 0;
+        poster.onerror = function () {
+          pi++;
+          if (it.posters && it.posters[pi]) poster.src = it.posters[pi];
+          else {
+            poster.remove();
+            enqueueFrame(card);
+          }
+        };
+        poster.src = it.poster;
+        card.appendChild(poster);
+      }
       var badge = document.createElement('div');
       badge.className = 'badge';
       badge.textContent = 'VIDEO';
       card.appendChild(badge);
       if (io) io.observe(card);
+      card.onmouseenter = function () { playCard(card); };
+      card.onmouseleave = function () { pauseCard(card); };
     } else {
       var img = document.createElement('img');
       img.src = it.url;
@@ -212,35 +251,94 @@
     rendered = g.shown;
     if (items.length) {
       var extra = g.multi.length ? (g.multi.length + ' cycles \u00b7 ') : '';
-      setStatus('v3 \u00b7 ' + extra + g.shown + (g.shown !== items.length ? ' of ' + items.length : '') + ' shown. Scroll to scan. Click selects. Double-click opens.');
+      setStatus('v4 \u00b7 ' + extra + g.shown + (g.shown !== items.length ? ' of ' + items.length : '') + ' shown. Scroll to scan. Hover a video to play.');
     }
   }
 
-  function bindVideo(card) {
+  var frameQueue = [];
+  var frameActive = 0;
+
+  function playCard(card) {
     var video = card.querySelector('video');
-    if (!video || video.src) return;
-    video.src = video.dataset.src;
-    video.preload = 'metadata';
+    if (!video) return;
+    if (!video.src) {
+      video.src = video.dataset.src;
+      video.preload = 'auto';
+    }
+    card.classList.add('playing');
+    video.play().catch(function () {});
+  }
+
+  function pauseCard(card) {
+    var video = card.querySelector('video');
+    if (!video) return;
+    video.pause();
+    card.classList.remove('playing');
+  }
+
+  function enqueueFrame(card) {
+    if (!card || !card.isConnected) return;
+    if (card.dataset.framed === '1' || card.dataset.queued === '1') return;
+    if (card.querySelector('img.poster')) return;
+    card.dataset.queued = '1';
+    frameQueue.push(card);
+    pumpFrames();
+  }
+
+  function pumpFrames() {
+    while (frameActive < 3 && frameQueue.length) {
+      var card = frameQueue.shift();
+      if (!card || !card.isConnected || card.querySelector('img.poster')) {
+        if (card) card.dataset.queued = '';
+        continue;
+      }
+      frameActive++;
+      grabFrame(card);
+    }
+  }
+
+  function grabFrame(card) {
+    var video = card.querySelector('video');
+    var finished = false;
+    function done(ok) {
+      if (finished) return;
+      finished = true;
+      card.dataset.queued = '';
+      if (ok) {
+        card.dataset.framed = '1';
+        card.classList.add('framed');
+        try { video.pause(); } catch (e) {}
+      }
+      frameActive = Math.max(0, frameActive - 1);
+      pumpFrames();
+    }
+    if (!video) { done(false); return; }
+    if (!video.src) {
+      video.src = video.dataset.src;
+      video.preload = 'auto';
+    }
+    var timer = setTimeout(function () { done(false); }, 8000);
+    function finish(ok) { clearTimeout(timer); done(ok); }
+    function seek() {
+      var dur = video.duration;
+      var t = 0.25;
+      if (dur && isFinite(dur) && dur > 0) t = Math.min(1, Math.max(0.08, dur * 0.12));
+      try { video.currentTime = t; } catch (e) { finish(false); }
+    }
+    video.addEventListener('seeked', function () { finish(true); });
+    video.addEventListener('error', function () { finish(false); });
+    if (video.readyState >= 1) seek();
+    else video.addEventListener('loadedmetadata', seek);
   }
 
   function watch() {
     if (!('IntersectionObserver' in window)) return;
     io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
-        var video = entry.target.querySelector('video');
-        if (!video) return;
-        if (entry.isIntersecting) {
-          bindVideo(entry.target);
-          if (playing < 6 && video.paused) {
-            playing++;
-            video.play().catch(function () { playing = Math.max(0, playing - 1); });
-          }
-        } else if (!video.paused) {
-          video.pause();
-          playing = Math.max(0, playing - 1);
-        }
+        if (!entry.isIntersecting) return;
+        if (!entry.target.querySelector('img.poster')) enqueueFrame(entry.target);
       });
-    }, { root: ui.board, threshold: 0.45 });
+    }, { root: ui.board, rootMargin: '500px 0px', threshold: 0.01 });
   }
 
   function createUI() {
@@ -267,17 +365,20 @@
       '#grok-reels-fullscreen .tile{position:relative;aspect-ratio:9/16;width:100%;border-radius:10px;overflow:hidden;background:#141414;cursor:pointer}',
       '#grok-reels-fullscreen .strip .tile{width:148px;flex:0 0 148px}',
       '#grok-reels-fullscreen .tile.on{outline:3px solid #4ade80;outline-offset:-3px}',
-      '#grok-reels-fullscreen .tile img,#grok-reels-fullscreen .tile video{width:100%;height:100%;object-fit:cover;display:block;background:#000}',
-      '#grok-reels-fullscreen .badge{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}',
-      '#grok-reels-fullscreen .check{position:absolute;top:6px;left:6px;width:18px;height:18px;border:2px solid #fff;border-radius:4px;background:rgba(0,0,0,.4);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}',
+      '#grok-reels-fullscreen .tile img,#grok-reels-fullscreen .tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#141414}',
+      '#grok-reels-fullscreen .tile img{z-index:1}',
+      '#grok-reels-fullscreen .tile video{z-index:0}',
+      '#grok-reels-fullscreen .tile.framed video,#grok-reels-fullscreen .tile.playing video{z-index:2}',
+      '#grok-reels-fullscreen .badge{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.7);font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}',
+      '#grok-reels-fullscreen .check{position:absolute;top:6px;left:6px;z-index:3;width:18px;height:18px;border:2px solid #fff;border-radius:4px;background:rgba(0,0,0,.4);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}',
       '#grok-reels-fullscreen .tile.on .check{background:#4ade80;border-color:#4ade80;color:#041}',
       '</style>',
-      '<header><h2>Reels Library <span class="v">v3</span></h2>',
+      '<header><h2>Reels Library <span class="v">v4</span></h2>',
       '<input id="grb-search" placeholder="Filter by name or prompt">',
       '<select id="grb-filter"><option value="all">All</option><option value="video">Video</option><option value="image">Image</option></select>',
       '<button id="grb-dl" type="button" disabled>Download selected (0)</button>',
       '<button class="x" type="button">\u00d7</button></header>',
-      '<div class="status" id="grb-status">v3 \u00b7 loading your Imagine library\u2026</div>',
+      '<div class="status" id="grb-status">v4 \u00b7 loading your Imagine library\u2026</div>',
       '<div class="debug" id="grb-debug"></div>',
       '<div class="board" id="grb-board"></div>'
     ].join('');
@@ -322,7 +423,7 @@
       raw += assets.length;
       assets.forEach(addAsset);
       if (items.length !== rendered) render();
-      setStatus('v3 \u00b7 ' + feed.name + ' \u00b7 ' + items.length + ' media');
+      setStatus('v4 \u00b7 ' + feed.name + ' \u00b7 ' + items.length + ' media');
       token = (page.json && page.json.nextPageToken) || '';
       pages++;
       if (pages >= 80) break;
@@ -354,7 +455,7 @@
         if (p.originalPostId && p.originalPostId !== id) { item.parentId = p.originalPostId; linked++; }
         var prompt = p.prompt || p.originalPrompt || '';
         if (prompt) item.text = prompt;
-        if (!item.poster && p.thumbnailImageUrl) item.poster = p.thumbnailImageUrl;
+        if (!item.poster && p.thumbnailImageUrl) item.poster = mediaUrl(p.thumbnailImageUrl);
       });
     }
     if (linked) render();
@@ -390,7 +491,7 @@
       } catch (e) {}
     }
     paintSelect();
-    setStatus('v3 \u00b7 if Safari saved only one file, allow multiple downloads for grok.com (Safari \u2192 Settings \u2192 Websites \u2192 Downloads).');
+    setStatus('v4 \u00b7 if Safari saved only one file, allow multiple downloads for grok.com (Safari \u2192 Settings \u2192 Websites \u2192 Downloads).');
   }
 
   async function main() {
@@ -408,7 +509,7 @@
       }
     }
     if (!items.length) {
-      setStatus('v3 \u00b7 no images or videos came back.');
+      setStatus('v4 \u00b7 no images or videos came back.');
       ui.debug.className = 'debug on';
       setDebug(notes.filter(Boolean).join('\n'));
       window.__grokReelsLoading = false;
@@ -417,7 +518,7 @@
     setDebug('');
     ui.debug.className = 'debug';
     render();
-    setStatus('v3 \u00b7 ' + items.length + ' media via ' + used + '. Linking image + video cycles\u2026');
+    setStatus('v4 \u00b7 ' + items.length + ' media via ' + used + '. Linking image + video cycles\u2026');
     try { await linkCycles(); } catch (e) {}
     render();
     window.__grokReelsLoading = false;
@@ -425,7 +526,7 @@
 
   main().catch(function (err) {
     window.__grokReelsLoading = false;
-    setStatus('v3 \u00b7 failed');
+    setStatus('v4 \u00b7 failed');
     if (ui.debug) { ui.debug.className = 'debug on'; setDebug(String(err && err.message || err)); }
   });
 })();
