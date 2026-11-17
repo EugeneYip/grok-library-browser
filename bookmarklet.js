@@ -1,309 +1,431 @@
-// v2 — GET /rest/assets list (not POST). Full-screen 9:16 gallery.
+// v3 — same GET the Imagine library uses. Full-screen 9:16 scan.
 (function () {
-  if (document.getElementById('grok-reels-fullscreen')) return;
+  if (window.__grokReelsLoading && document.getElementById('grok-reels-fullscreen')) return;
+  window.__grokReelsLoading = true;
+  var old = document.getElementById('grok-reels-fullscreen');
+  if (old) old.remove();
 
-  const API = 'https://grok.com/rest/assets';
-  const CDN = 'https://assets.grok.com/';
-  const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
-  const VIDEO_MIMES = ['video/mp4', 'video/webm', 'video/quicktime'];
+  var API = 'https://grok.com/rest/assets';
+  var BULK = 'https://grok.com/rest/media/post/bulk-get';
+  var CDN = 'https://assets.grok.com/';
+  var LIB_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'video/mp4'];
+  var WIDE_MIMES = LIB_MIMES.concat(['image/gif', 'image/avif', 'video/webm', 'video/quicktime']);
 
-  const allItems = [];
-  const seen = new Set();
-  const selected = new Set();
-  let filtered = [];
-  let overlay, grid, searchInput, statusEl, filterSelect, downloadBtn, debugEl;
-  let playing = 0;
+  var items = [];
+  var byId = {};
+  var selected = {};
+  var ui = {};
+  var playing = 0;
+  var io;
+  var rendered = 0;
 
-  function createUI() {
-    overlay = document.createElement('div');
-    overlay.id = 'grok-reels-fullscreen';
-    overlay.innerHTML = [
-      '<style>',
-      '#grok-reels-fullscreen{position:fixed;inset:0;z-index:2147483646;background:#0a0a0a;color:#eee;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column}',
-      '#grok-reels-fullscreen header{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#111;border-bottom:1px solid #2a2a2a}',
-      '#grok-reels-fullscreen h2{margin:0;font-size:15px;font-weight:650}',
-      '#grok-reels-fullscreen .ver{font-size:11px;color:#888;margin-left:4px}',
-      '#grok-reels-fullscreen .controls{display:flex;gap:8px;align-items:center;flex:1}',
-      '#grok-reels-fullscreen input,#grok-reels-fullscreen select,#grok-reels-fullscreen button{background:#1a1a1a;border:1px solid #3a3a3a;border-radius:8px;padding:7px 12px;color:#eee;font-size:13px}',
-      '#grok-reels-fullscreen input{flex:1;min-width:140px}',
-      '#grok-reels-fullscreen button{cursor:pointer}',
-      '#grok-reels-fullscreen button:disabled{opacity:.4;cursor:default}',
-      '#grok-reels-fullscreen .close{margin-left:auto;background:transparent;border:none;color:#aaa;font-size:22px;cursor:pointer}',
-      '#grok-reels-fullscreen .status{font-size:12px;color:#aaa;padding:6px 16px 0}',
-      '#grok-reels-fullscreen .debug{font-size:11px;color:#fbbf24;padding:4px 16px 6px;white-space:pre-wrap;word-break:break-all;max-height:72px;overflow:auto}',
-      '#grok-reels-fullscreen .grid{flex:1;overflow-y:auto;padding:14px 16px 48px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;align-content:start}',
-      '#grok-reels-fullscreen .item{aspect-ratio:9/16;border-radius:12px;overflow:hidden;position:relative;background:#141414;cursor:pointer}',
-      '#grok-reels-fullscreen .item.selected{outline:3px solid #4ade80;outline-offset:-3px}',
-      '#grok-reels-fullscreen .item img,#grok-reels-fullscreen .item video{width:100%;height:100%;object-fit:cover;display:block;background:#000}',
-      '#grok-reels-fullscreen .item .cap{position:absolute;left:0;right:0;bottom:0;padding:22px 8px 7px;font-size:11px;background:linear-gradient(transparent,rgba(0,0,0,.85));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0}',
-      '#grok-reels-fullscreen .item:hover .cap{opacity:1}',
-      '#grok-reels-fullscreen .badge{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.72);color:#fff;font-size:10px;font-weight:700;padding:3px 6px;border-radius:5px}',
-      '#grok-reels-fullscreen .check{position:absolute;top:8px;left:8px;width:20px;height:20px;border:2px solid #fff;border-radius:5px;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}',
-      '#grok-reels-fullscreen .item.selected .check{background:#4ade80;border-color:#4ade80;color:#000}',
-      '</style>',
-      '<header><h2>Reels Library<span class="ver">v2</span></h2>',
-      '<div class="controls">',
-      '<input id="grb-search" type="text" placeholder="Search name or summary">',
-      '<select id="grb-filter"><option value="all">All</option><option value="video">Video</option><option value="image">Image</option></select>',
-      '<button id="grb-download" disabled>Download selected (0)</button>',
-      '</div><button class="close" type="button">\u2715</button></header>',
-      '<div class="status" id="grb-status">Loading library\u2026</div>',
-      '<div class="debug" id="grb-debug"></div>',
-      '<div class="grid" id="grb-grid"></div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.close').onclick = function () { overlay.remove(); };
-    searchInput = document.getElementById('grb-search');
-    filterSelect = document.getElementById('grb-filter');
-    statusEl = document.getElementById('grb-status');
-    debugEl = document.getElementById('grb-debug');
-    grid = document.getElementById('grb-grid');
-    downloadBtn = document.getElementById('grb-download');
-    searchInput.oninput = applyFilter;
-    filterSelect.onchange = applyFilter;
-    downloadBtn.onclick = downloadSelected;
+  function qs(spec, token) {
+    var p = new URLSearchParams();
+    Object.keys(spec).forEach(function (k) {
+      var v = spec[k];
+      if (v == null || v === '') return;
+      if (Array.isArray(v)) v.forEach(function (x) { p.append(k, x); });
+      else p.set(k, String(v));
+    });
+    if (token) p.set('pageToken', token);
+    return p.toString();
   }
-
-  function setStatus(t) { if (statusEl) statusEl.textContent = t; }
-  function setDebug(t) { if (debugEl) debugEl.textContent = t || ''; }
 
   function mediaUrl(key) {
     if (!key || typeof key !== 'string') return '';
-    if (key.indexOf('http') === 0) return key;
-    return CDN + key.replace(/^\//, '') + '?cache=1';
+    if (/^https?:\/\//i.test(key)) return key;
+    return CDN + key.split('/').map(encodeURIComponent).join('/') + '?cache=1';
   }
 
   function kindOf(asset) {
-    const mime = String(asset.mimeType || '').toLowerCase();
-    const key = String(asset.key || '').toLowerCase();
-    if (mime.indexOf('video/') === 0 || /\.(mp4|webm|mov|m4v)$/.test(key)) return 'video';
-    if (mime.indexOf('image/') === 0 || /\.(jpg|jpeg|png|webp|gif|avif)$/.test(key)) return 'image';
+    var mime = String(asset.mimeType || '').toLowerCase();
+    var key = String(asset.key || '').toLowerCase();
+    if (mime.indexOf('video/') === 0 || /\.(mp4|webm|mov|m4v)(\?|$)/.test(key)) return 'video';
+    if (mime.indexOf('image/') === 0 || /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/.test(key)) return 'image';
+    var src = String(asset.fileSource || '');
+    if (src.indexOf('IMAGINE_GENERATED') >= 0 && asset.previewImageKey) return 'image';
     return '';
   }
 
-  function normalize(asset) {
-    const kind = kindOf(asset);
-    return {
-      id: asset.assetId || asset.key,
+  function addAsset(asset) {
+    if (!asset || asset.isDeleted || !asset.assetId) return;
+    var kind = kindOf(asset);
+    var url = mediaUrl(asset.key);
+    if (!kind || !url) return;
+    if (byId[asset.assetId]) return;
+    var item = {
+      id: asset.assetId,
       kind: kind,
-      url: mediaUrl(asset.key),
+      url: url,
       poster: mediaUrl(asset.previewImageKey),
       text: asset.summary || asset.name || '',
+      time: asset.createTime || asset.lastUseTime || '',
+      root: asset.rootAssetId || asset.assetId,
+      parentId: '',
       mime: asset.mimeType || ''
     };
+    byId[item.id] = item;
+    items.push(item);
   }
 
-  async function getPage(params) {
-    const res = await fetch(API + '?' + params.toString(), {
-      method: 'GET',
-      credentials: 'include',
-      headers: { Accept: 'application/json' }
-    });
-    const text = await res.text();
-    let json = null;
+  async function getJson(url, opts) {
+    var res = await fetch(url, opts);
+    var text = await res.text();
+    var json = null;
     try { json = JSON.parse(text); } catch (e) { json = null; }
-    return { ok: res.ok, status: res.status, json: json, text: text.slice(0, 280) };
+    return { ok: res.ok, status: res.status, json: json, text: text.slice(0, 220) };
   }
 
-  function baseParams(mode) {
-    const p = new URLSearchParams();
-    p.set('pageSize', '60');
-    p.set('orderBy', 'ORDER_BY_CREATE_TIME');
-    p.set('includeImagineFiles', 'true');
-    if (mode === 'media') {
-      IMAGE_MIMES.concat(VIDEO_MIMES).forEach(function (m) { p.append('mimeTypes', m); });
-      p.set('source', 'SOURCE_ANY');
-    } else {
-      p.set('workspaceKind', 'WORKSPACE_KIND_IMAGINE_ALL');
-    }
-    return p;
-  }
+  var FEEDS = [
+    { name: 'imagine-library', spec: { pageSize: '40', orderBy: 'ORDER_BY_CREATE_TIME', workspaceKind: 'WORKSPACE_KIND_IMAGINE_ALL', mimeTypes: LIB_MIMES } },
+    { name: 'imagine-any-type', spec: { pageSize: '40', orderBy: 'ORDER_BY_CREATE_TIME', workspaceKind: 'WORKSPACE_KIND_IMAGINE_ALL' } },
+    { name: 'source-generated', spec: { pageSize: '40', orderBy: 'ORDER_BY_CREATE_TIME', source: 'SOURCE_GENERATED', includeImagineFiles: 'true', mimeTypes: WIDE_MIMES } },
+    { name: 'files-with-imagine', spec: { pageSize: '40', orderBy: 'ORDER_BY_LAST_USE_TIME', source: 'SOURCE_ANY', includeImagineFiles: 'true', isLatest: 'true', mimeTypes: WIDE_MIMES } }
+  ];
 
-  function takeAssets(json) {
-    if (!json) return null;
-    if (Array.isArray(json.assets)) return json.assets;
-    if (Array.isArray(json)) return json;
-    return null;
-  }
+  function setStatus(t) { if (ui.status) ui.status.textContent = t; }
+  function setDebug(t) { if (ui.debug) ui.debug.textContent = t || ''; }
 
-  function addAssets(list) {
-    let added = 0;
-    list.forEach(function (asset) {
-      if (!asset || asset.isDeleted) return;
-      const item = normalize(asset);
-      if (!item.kind || !item.url || !item.id) return;
-      if (seen.has(item.id)) return;
-      seen.add(item.id);
-      allItems.push(item);
-      added++;
-    });
-    return added;
-  }
-
-  async function walk(mode) {
-    let token = '';
-    let pages = 0;
-    let last = '';
-    do {
-      const params = baseParams(mode);
-      if (token) params.set('pageToken', token);
-      const page = await getPage(params);
-      if (!page.ok) {
-        last = mode + ' HTTP ' + page.status + ' ' + page.text;
-        break;
-      }
-      const assets = takeAssets(page.json);
-      if (!assets) {
-        last = mode + ' unexpected keys: ' + Object.keys(page.json || {}).join(', ') + ' ' + page.text;
-        break;
-      }
-      addAssets(assets);
-      applyFilter();
-      setStatus('Loaded ' + allItems.length + ' media\u2026');
-      token = (page.json && (page.json.nextPageToken || page.json.next_page_token)) || '';
-      pages++;
-      if (pages >= 40) break;
-    } while (token);
-    return last;
-  }
-
-  async function loadAll() {
-    createUI();
-    setStatus('Loading library\u2026');
-    const errA = await walk('media');
-    const errB = allItems.length < 5 ? await walk('imagine') : '';
-    if (!allItems.length) {
-      setStatus('No image or video assets returned');
-      setDebug([errA, errB].filter(Boolean).join('\n') || 'Both feeds returned zero media rows.');
-      return;
-    }
-    setDebug('');
-    setStatus(allItems.length + ' items. Scroll to scan. Click to select, double-click to open.');
-    applyFilter();
-  }
-
-  function applyFilter() {
-    const q = (searchInput.value || '').toLowerCase();
-    const mode = filterSelect.value;
-    filtered = allItems.filter(function (item) {
-      if (mode !== 'all' && item.kind !== mode) return false;
-      if (q && (item.text || '').toLowerCase().indexOf(q) === -1) return false;
+  function groups() {
+    var q = (ui.search && ui.search.value || '').toLowerCase();
+    var mode = ui.filter ? ui.filter.value : 'all';
+    var visible = items.filter(function (it) {
+      if (mode !== 'all' && it.kind !== mode) return false;
+      if (q && (it.text || '').toLowerCase().indexOf(q) === -1 && it.id.indexOf(q) === -1) return false;
       return true;
     });
-    renderGrid();
+    var map = {};
+    var order = [];
+    visible.forEach(function (it) {
+      var key = (it.parentId && byId[it.parentId]) ? it.parentId : (it.root || it.id);
+      if (!map[key]) { map[key] = []; order.push(key); }
+      map[key].push(it);
+    });
+    order.sort(function (a, b) {
+      var ta = (map[a][0] && map[a][0].time) || '';
+      var tb = (map[b][0] && map[b][0].time) || '';
+      return ta < tb ? 1 : ta > tb ? -1 : 0;
+    });
+    var multi = [];
+    var singles = [];
+    order.forEach(function (key) {
+      var list = map[key].slice().sort(function (a, b) {
+        if (a.kind !== b.kind) return a.kind === 'image' ? -1 : 1;
+        return a.time < b.time ? 1 : -1;
+      });
+      if (list.length > 1) multi.push(list);
+      else singles.push(list[0]);
+    });
+    return { multi: multi, singles: singles, shown: visible.length };
   }
 
-  function renderGrid() {
-    grid.innerHTML = '';
-    filtered.forEach(function (item) {
-      const card = document.createElement('div');
-      card.className = 'item' + (selected.has(item.id) ? ' selected' : '');
-      const check = document.createElement('div');
-      check.className = 'check';
-      check.textContent = selected.has(item.id) ? '\u2713' : '';
-      card.appendChild(check);
-
-      if (item.kind === 'video') {
-        const video = document.createElement('video');
-        video.src = item.url;
-        video.muted = true;
-        video.loop = true;
-        video.playsInline = true;
-        video.preload = 'metadata';
-        if (item.poster) video.poster = item.poster;
-        card.appendChild(video);
-        const badge = document.createElement('div');
-        badge.className = 'badge';
-        badge.textContent = 'VIDEO';
-        card.appendChild(badge);
-        observe(video);
-      } else {
-        const img = document.createElement('img');
-        img.src = item.url;
-        img.alt = item.text || 'image';
-        img.loading = 'lazy';
-        card.appendChild(img);
+  function tile(it) {
+    var card = document.createElement('div');
+    card.className = 'tile' + (selected[it.id] ? ' on' : '');
+    card.dataset.id = it.id;
+    var check = document.createElement('div');
+    check.className = 'check';
+    check.textContent = selected[it.id] ? '\u2713' : '';
+    card.appendChild(check);
+    if (it.kind === 'video') {
+      if (it.poster) {
+        var poster = document.createElement('img');
+        poster.src = it.poster;
+        poster.alt = '';
+        card.appendChild(poster);
       }
+      var video = document.createElement('video');
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = 'none';
+      video.dataset.src = it.url;
+      if (it.poster) video.poster = it.poster;
+      card.appendChild(video);
+      var badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.textContent = 'VIDEO';
+      card.appendChild(badge);
+      if (io) io.observe(card);
+    } else {
+      var img = document.createElement('img');
+      img.src = it.url;
+      img.alt = it.text || 'image';
+      img.loading = 'lazy';
+      card.appendChild(img);
+    }
+    card.onclick = function () {
+      if (selected[it.id]) delete selected[it.id];
+      else selected[it.id] = 1;
+      paintSelect();
+    };
+    card.ondblclick = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      window.open(it.url, '_blank');
+    };
+    return card;
+  }
 
-      if (item.text) {
-        const cap = document.createElement('div');
-        cap.className = 'cap';
-        cap.textContent = item.text;
-        card.appendChild(cap);
-      }
-
-      card.onclick = function () {
-        if (selected.has(item.id)) {
-          selected.delete(item.id);
-          card.classList.remove('selected');
-          check.textContent = '';
-        } else {
-          selected.add(item.id);
-          card.classList.add('selected');
-          check.textContent = '\u2713';
-        }
-        const n = selected.size;
-        downloadBtn.textContent = 'Download selected (' + n + ')';
-        downloadBtn.disabled = n === 0;
-      };
-      card.ondblclick = function (event) {
-        event.stopPropagation();
-        window.open(item.url, '_blank');
-      };
-      grid.appendChild(card);
-    });
-    if (filtered.length) {
-      setStatus(filtered.length + ' shown' + (filtered.length < allItems.length ? ' of ' + allItems.length : '') + '. Videos play as you scroll.');
+  function paintSelect() {
+    var n = Object.keys(selected).length;
+    if (ui.download) {
+      ui.download.textContent = 'Download selected (' + n + ')';
+      ui.download.disabled = n === 0;
+    }
+    var cards = ui.board.querySelectorAll('.tile');
+    for (var i = 0; i < cards.length; i++) {
+      var id = cards[i].dataset.id;
+      var on = !!selected[id];
+      cards[i].classList.toggle('on', on);
+      var c = cards[i].querySelector('.check');
+      if (c) c.textContent = on ? '\u2713' : '';
     }
   }
 
-  function observe(video) {
-    if (!('IntersectionObserver' in window)) return;
-    const io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting && playing < 4) {
-          playing++;
-          video.play().catch(function () { playing = Math.max(0, playing - 1); });
-        } else if (!entry.isIntersecting) {
-          if (!video.paused) playing = Math.max(0, playing - 1);
-          video.pause();
-        }
-      });
-    }, { root: grid, threshold: 0.6 });
-    io.observe(video);
+  function render() {
+    if (!ui.board) return;
+    var g = groups();
+    ui.board.innerHTML = '';
+    g.multi.forEach(function (list) {
+      var row = document.createElement('div');
+      row.className = 'cycle';
+      var label = document.createElement('div');
+      label.className = 'cycle-label';
+      var when = (list[0].time || '').slice(0, 10);
+      var prompt = '';
+      for (var i = 0; i < list.length; i++) if (list[i].text) { prompt = list[i].text; break; }
+      label.textContent = (when ? when + ' \u00b7 ' : '') + list.length + ' in this cycle' + (prompt ? '\n' + prompt : '');
+      row.appendChild(label);
+      var strip = document.createElement('div');
+      strip.className = 'strip';
+      list.forEach(function (it) { strip.appendChild(tile(it)); });
+      row.appendChild(strip);
+      ui.board.appendChild(row);
+    });
+    if (g.singles.length) {
+      var grid = document.createElement('div');
+      grid.className = 'grid';
+      g.singles.forEach(function (it) { grid.appendChild(tile(it)); });
+      ui.board.appendChild(grid);
+    }
+    rendered = g.shown;
+    if (items.length) {
+      var extra = g.multi.length ? (g.multi.length + ' cycles \u00b7 ') : '';
+      setStatus('v3 \u00b7 ' + extra + g.shown + (g.shown !== items.length ? ' of ' + items.length : '') + ' shown. Scroll to scan. Click selects. Double-click opens.');
+    }
   }
 
-  function filenameFor(item) {
-    const id = String(item.id || 'grok').slice(0, 12);
-    if (item.kind === 'video') return 'grok-' + id + '.mp4';
-    if ((item.mime || '').indexOf('png') >= 0) return 'grok-' + id + '.png';
-    if ((item.mime || '').indexOf('webp') >= 0) return 'grok-' + id + '.webp';
-    return 'grok-' + id + '.jpg';
+  function bindVideo(card) {
+    var video = card.querySelector('video');
+    if (!video || video.src) return;
+    video.src = video.dataset.src;
+    video.preload = 'metadata';
+  }
+
+  function watch() {
+    if (!('IntersectionObserver' in window)) return;
+    io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var video = entry.target.querySelector('video');
+        if (!video) return;
+        if (entry.isIntersecting) {
+          bindVideo(entry.target);
+          if (playing < 6 && video.paused) {
+            playing++;
+            video.play().catch(function () { playing = Math.max(0, playing - 1); });
+          }
+        } else if (!video.paused) {
+          video.pause();
+          playing = Math.max(0, playing - 1);
+        }
+      });
+    }, { root: ui.board, threshold: 0.45 });
+  }
+
+  function createUI() {
+    var overlay = document.createElement('div');
+    overlay.id = 'grok-reels-fullscreen';
+    overlay.innerHTML = [
+      '<style>',
+      '#grok-reels-fullscreen{position:fixed;inset:0;z-index:2147483646;background:#070707;color:#eee;font:13px/1.35 system-ui,-apple-system,sans-serif;display:flex;flex-direction:column}',
+      '#grok-reels-fullscreen header{display:flex;gap:8px;align-items:center;padding:10px 14px;background:#111;border-bottom:1px solid #2a2a2a}',
+      '#grok-reels-fullscreen h2{margin:0;font-size:15px;white-space:nowrap}',
+      '#grok-reels-fullscreen .v{color:#4ade80;font-size:12px;margin-left:6px}',
+      '#grok-reels-fullscreen input,#grok-reels-fullscreen select,#grok-reels-fullscreen button{background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:7px 10px;color:#eee;font:inherit}',
+      '#grok-reels-fullscreen input{flex:1;min-width:120px}',
+      '#grok-reels-fullscreen button{cursor:pointer}#grok-reels-fullscreen button:disabled{opacity:.45;cursor:default}',
+      '#grok-reels-fullscreen .x{margin-left:auto;background:transparent;border:none;color:#aaa;font-size:22px;cursor:pointer}',
+      '#grok-reels-fullscreen .status{padding:6px 14px 0;color:#aaa;font-size:12px}',
+      '#grok-reels-fullscreen .debug{display:none;margin:6px 14px;padding:8px;background:#3a2a05;color:#fbbf24;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow:auto;font-size:11px}',
+      '#grok-reels-fullscreen .debug.on{display:block}',
+      '#grok-reels-fullscreen .board{flex:1;overflow:auto;padding:12px 14px 48px}',
+      '#grok-reels-fullscreen .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;align-content:start}',
+      '#grok-reels-fullscreen .cycle{display:flex;gap:10px;align-items:stretch;margin:0 0 14px;padding-bottom:12px;border-bottom:1px solid #222}',
+      '#grok-reels-fullscreen .cycle-label{flex:0 0 148px;color:#bbb;font-size:12px;white-space:pre-wrap;overflow:hidden}',
+      '#grok-reels-fullscreen .strip{display:flex;gap:10px;overflow-x:auto;flex:1}',
+      '#grok-reels-fullscreen .tile{position:relative;aspect-ratio:9/16;width:100%;border-radius:10px;overflow:hidden;background:#141414;cursor:pointer}',
+      '#grok-reels-fullscreen .strip .tile{width:148px;flex:0 0 148px}',
+      '#grok-reels-fullscreen .tile.on{outline:3px solid #4ade80;outline-offset:-3px}',
+      '#grok-reels-fullscreen .tile img,#grok-reels-fullscreen .tile video{width:100%;height:100%;object-fit:cover;display:block;background:#000}',
+      '#grok-reels-fullscreen .badge{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.7);font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}',
+      '#grok-reels-fullscreen .check{position:absolute;top:6px;left:6px;width:18px;height:18px;border:2px solid #fff;border-radius:4px;background:rgba(0,0,0,.4);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}',
+      '#grok-reels-fullscreen .tile.on .check{background:#4ade80;border-color:#4ade80;color:#041}',
+      '</style>',
+      '<header><h2>Reels Library <span class="v">v3</span></h2>',
+      '<input id="grb-search" placeholder="Filter by name or prompt">',
+      '<select id="grb-filter"><option value="all">All</option><option value="video">Video</option><option value="image">Image</option></select>',
+      '<button id="grb-dl" type="button" disabled>Download selected (0)</button>',
+      '<button class="x" type="button">\u00d7</button></header>',
+      '<div class="status" id="grb-status">v3 \u00b7 loading your Imagine library\u2026</div>',
+      '<div class="debug" id="grb-debug"></div>',
+      '<div class="board" id="grb-board"></div>'
+    ].join('');
+    document.body.appendChild(overlay);
+    ui.board = overlay.querySelector('#grb-board');
+    ui.status = overlay.querySelector('#grb-status');
+    ui.debug = overlay.querySelector('#grb-debug');
+    ui.search = overlay.querySelector('#grb-search');
+    ui.filter = overlay.querySelector('#grb-filter');
+    ui.download = overlay.querySelector('#grb-dl');
+    overlay.querySelector('.x').onclick = function () {
+      window.__grokReelsLoading = false;
+      overlay.remove();
+    };
+    ui.search.oninput = render;
+    ui.filter.onchange = render;
+    ui.download.onclick = downloadSelected;
+    document.addEventListener('keydown', function esc(ev) {
+      if (ev.key === 'Escape') {
+        window.__grokReelsLoading = false;
+        overlay.remove();
+        document.removeEventListener('keydown', esc);
+      }
+    });
+    watch();
+  }
+
+  async function walk(feed) {
+    var token = '';
+    var pages = 0;
+    var raw = 0;
+    var before = items.length;
+    do {
+      var url = API + '?' + qs(feed.spec, token);
+      var page = await getJson(url, { method: 'GET', credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!page.ok) return { ok: false, note: feed.name + ' HTTP ' + page.status + ' ' + page.text };
+      var assets = page.json && Array.isArray(page.json.assets) ? page.json.assets : null;
+      if (!assets) {
+        var keys = page.json && typeof page.json === 'object' ? Object.keys(page.json).join(', ') : 'not-json';
+        return { ok: false, note: feed.name + ' was not a list. keys: ' + keys + ' ' + page.text };
+      }
+      raw += assets.length;
+      assets.forEach(addAsset);
+      if (items.length !== rendered) render();
+      setStatus('v3 \u00b7 ' + feed.name + ' \u00b7 ' + items.length + ' media');
+      token = (page.json && page.json.nextPageToken) || '';
+      pages++;
+      if (pages >= 80) break;
+    } while (token);
+    return { ok: true, raw: raw, added: items.length - before, pages: pages, capped: pages >= 80 && !!token };
+  }
+
+  async function linkCycles() {
+    var ids = items.map(function (it) { return it.id; });
+    var linked = 0;
+    for (var i = 0; i < ids.length; i += 80) {
+      var batch = ids.slice(i, i + 80);
+      var page;
+      try {
+        page = await getJson(BULK, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: batch })
+        });
+      } catch (e) { break; }
+      if (!page.ok || !page.json) break;
+      var posts = page.json.posts || page.json.mediaPosts || [];
+      if (!Array.isArray(posts)) break;
+      posts.forEach(function (p) {
+        var id = p.id || p.postId;
+        var item = id && byId[id];
+        if (!item) return;
+        if (p.originalPostId && p.originalPostId !== id) { item.parentId = p.originalPostId; linked++; }
+        var prompt = p.prompt || p.originalPrompt || '';
+        if (prompt) item.text = prompt;
+        if (!item.poster && p.thumbnailImageUrl) item.poster = p.thumbnailImageUrl;
+      });
+    }
+    if (linked) render();
+  }
+
+  function filename(it) {
+    var base = (it.text || 'grok').replace(/[^\w\-]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'grok';
+    var id = String(it.id).slice(0, 8);
+    if (it.kind === 'video') return base + '-' + id + '.mp4';
+    if ((it.mime || '').indexOf('png') >= 0) return base + '-' + id + '.png';
+    if ((it.mime || '').indexOf('webp') >= 0) return base + '-' + id + '.webp';
+    return base + '-' + id + '.jpg';
   }
 
   async function downloadSelected() {
-    const items = filtered.filter(function (item) { return selected.has(item.id); });
-    if (!items.length) return;
-    downloadBtn.disabled = true;
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      downloadBtn.textContent = 'Downloading ' + (i + 1) + '/' + items.length;
+    var list = items.filter(function (it) { return selected[it.id]; });
+    if (!list.length) return;
+    ui.download.disabled = true;
+    for (var i = 0; i < list.length; i++) {
+      ui.download.textContent = 'Saving ' + (i + 1) + '/' + list.length;
       try {
-        const res = await fetch(item.url, { credentials: 'include' });
+        var res = await fetch(list[i].url, { credentials: 'include' });
         if (!res.ok) continue;
-        const blob = await res.blob();
-        const a = document.createElement('a');
+        var blob = await res.blob();
+        var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = filenameFor(item);
+        a.download = filename(list[i]);
         document.body.appendChild(a);
         a.click();
-        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
-        await new Promise(function (r) { setTimeout(r, 350); });
+        a.remove();
+        setTimeout(function (href) { return function () { URL.revokeObjectURL(href); }; }(a.href), 1500);
+        await new Promise(function (r) { setTimeout(r, 400); });
       } catch (e) {}
     }
-    downloadBtn.disabled = false;
-    downloadBtn.textContent = 'Download selected (' + selected.size + ')';
+    paintSelect();
+    setStatus('v3 \u00b7 if Safari saved only one file, allow multiple downloads for grok.com (Safari \u2192 Settings \u2192 Websites \u2192 Downloads).');
   }
 
-  loadAll();
+  async function main() {
+    createUI();
+    var notes = [];
+    var used = '';
+    for (var i = 0; i < FEEDS.length; i++) {
+      if (items.length) break;
+      var result = await walk(FEEDS[i]);
+      notes.push(result.note || (FEEDS[i].name + ' raw ' + result.raw + ' kept ' + result.added));
+      if (result.ok && items.length) {
+        used = FEEDS[i].name;
+        if (result.capped) notes.push('stopped after 80 pages');
+        break;
+      }
+    }
+    if (!items.length) {
+      setStatus('v3 \u00b7 no images or videos came back.');
+      ui.debug.className = 'debug on';
+      setDebug(notes.filter(Boolean).join('\n'));
+      window.__grokReelsLoading = false;
+      return;
+    }
+    setDebug('');
+    ui.debug.className = 'debug';
+    render();
+    setStatus('v3 \u00b7 ' + items.length + ' media via ' + used + '. Linking image + video cycles\u2026');
+    try { await linkCycles(); } catch (e) {}
+    render();
+    window.__grokReelsLoading = false;
+  }
+
+  main().catch(function (err) {
+    window.__grokReelsLoading = false;
+    setStatus('v3 \u00b7 failed');
+    if (ui.debug) { ui.debug.className = 'debug on'; setDebug(String(err && err.message || err)); }
+  });
 })();

@@ -2,62 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Grok Reels Library — Bookmarklet</title>
+<title>Grok Reels Library v3</title>
 <style>
-  body { font-family: system-ui, -apple-system, sans-serif; max-width: 680px; margin: 40px auto; padding: 0 20px; line-height: 1.5; color: #111; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.5; color: #111; }
   h1 { font-size: 1.6rem; }
   .bookmarklet { display: inline-block; margin: 16px 0; padding: 12px 20px; background: #111; color: #fff; border-radius: 10px; text-decoration: none; font-weight: 600; }
   .bookmarklet:hover { background: #333; }
-  code, pre { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
-  pre { padding: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
   ol { padding-left: 20px; }
-  .note { background: #f9f9f9; border-left: 3px solid #111; padding: 12px 16px; margin: 16px 0; font-size: 0.95em; }
+  .note { background: #fff7e6; border-left: 3px solid #b45309; padding: 12px 16px; margin: 16px 0; }
+  .ok { background: #f4f4f4; border-left: 3px solid #111; padding: 12px 16px; margin: 16px 0; }
+  #load-state { font-size: 0.95rem; }
 </style>
 </head>
 <body>
-<h1>Grok Reels Library</h1>
-<p>Pure browser tool for browsing and downloading your vertical (9:16) Grok generations. No extension required.</p>
-
-<h2>Install the bookmarklet</h2>
-<p>Drag the button below to your bookmarks bar.</p>
-
-<a class="bookmarklet" id="install-link" href="#">⭐ Reels Library</a>
+<h1>Grok Reels Library v3</h1>
+<p>Full-screen 9:16 scan of your Imagine images and videos. Runs in Safari on grok.com. No extension.</p>
 
 <div class="note">
-  <strong>Safari:</strong> View → Show Bookmarks Bar (or ⌘⇧B) if the bar is hidden.<br>
-  After dragging, the bookmark is ready to use.
+  <strong>Replace the old bookmark.</strong> The one already on your bar is a frozen copy of the broken script (the header does not say <code>v3</code>, and the search box says “Search prompts…”). Dragging is required once. After that, this page always builds the button from the latest script.
 </div>
 
-<h2>How to use</h2>
+<h2>1. Drag this to the bookmarks bar</h2>
+<p id="load-state">Loading the v3 bookmark…</p>
+<a class="bookmarklet" id="install-link" href="#">Reels Library v3</a>
+
+<div class="ok">
+  <strong>Safari:</strong> View → Show Bookmarks Bar (⌘⇧B).<br>
+  If a bookmark named “Reels Library” is already there, delete it, then drag <strong>Reels Library v3</strong>.
+</div>
+
+<h2>2. Open your library and click the new bookmark</h2>
 <ol>
-  <li>Log in to Grok and open <a href="https://grok.com/library" target="_blank">https://grok.com/library</a> or <a href="https://grok.com/imagine" target="_blank">https://grok.com/imagine</a>.</li>
-  <li>Click the <strong>Reels Library</strong> bookmark.</li>
-  <li>A floating 9:16 grid appears.
-    <ul>
-      <li><strong>Click</strong> an item to select / deselect it (green outline).</li>
-      <li><strong>Double-click</strong> an item to open the full media.</li>
-      <li>Use the search box and Image/Video filter.</li>
-      <li>Click <strong>Download selected (N)</strong> to save the chosen files directly in the browser.</li>
-    </ul>
-  </li>
+  <li>Log in and open <a href="https://grok.com/library">https://grok.com/library</a>.</li>
+  <li>Click <strong>Reels Library v3</strong>.</li>
+  <li>The header must say <strong>Reels Library v3</strong> in green. If it does not, you clicked the old bookmark.</li>
+  <li>Images and videos fill the screen as pages load. You do not open each item to see it. Videos play while you scroll.</li>
+  <li>A row labeled “in this cycle” is one image plus the videos made from it, side by side. Everything else sits in the 9:16 grid under that.</li>
+  <li>Click to select. Double-click to open the file. Download selected saves the files in the browser.</li>
 </ol>
 
-<p>Downloads use your existing login session. Files are saved with their original names when possible.</p>
+<p>If Safari only saves the first download, allow multiple downloads for grok.com: Safari → Settings → Websites → Downloads.</p>
 
-<p><small>Source: <a href="https://github.com/EugeneYip/grok-library-browser">github.com/EugeneYip/grok-library-browser</a> · <a href="https://raw.githubusercontent.com/EugeneYip/grok-library-browser/main/bookmarklet.js">bookmarklet.js</a></small></p>
+<p><small>Source: <a href="https://github.com/EugeneYip/grok-library-browser">github.com/EugeneYip/grok-library-browser</a></small></p>
 
 <script>
-// Build the bookmarklet URL from the latest source so the drag link always matches the repo
-fetch('https://raw.githubusercontent.com/EugeneYip/grok-library-browser/main/bookmarklet.js')
-  .then(r => r.text())
-  .then(src => {
-    // Strip the comment line and wrap as javascript:
-    const code = src.replace(/^\/\/.*\n/, '').trim();
-    document.getElementById('install-link').href = 'javascript:' + encodeURIComponent(code);
-  })
-  .catch(() => {
-    document.getElementById('install-link').textContent = 'Failed to load bookmarklet — check connection';
-  });
+  var link = document.getElementById('install-link');
+  var state = document.getElementById('load-state');
+  fetch('https://raw.githubusercontent.com/EugeneYip/grok-library-browser/main/bookmarklet.js?t=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(function (src) {
+      var code = src.replace(/^\uFEFF/, '').replace(/^\/\/.*\n/, '').trim();
+      if (code.indexOf('Reels Library') < 0 || code.indexOf('WORKSPACE_KIND_IMAGINE_ALL') < 0) {
+        throw new Error('script did not look like v3');
+      }
+      link.href = 'javascript:' + encodeURIComponent(code);
+      link.textContent = 'Reels Library v3';
+      state.textContent = 'Ready. Drag “Reels Library v3” onto the bookmarks bar.';
+    })
+    .catch(function (err) {
+      link.textContent = 'Could not load v3';
+      state.textContent = 'The install script failed (' + err.message + '). Hard-refresh this page (⌘⇧R) and try again.';
+    });
 </script>
 </body>
 </html>

@@ -1,18 +1,13 @@
 # Grok Reels Library
 
-Pure browser bookmarklet for browsing and downloading your vertical (9:16) Grok generations.
+Browser bookmarklet for a full-screen 9:16 scan of Imagine images and videos. No extension.
 
-**Install page:** https://eugeneyip.github.io/grok-library-browser/
+Install: [https://eugeneyip.github.io/grok-library-browser/](https://eugeneyip.github.io/grok-library-browser/)
 
-No extension required. Drag the button on the install page to your bookmarks bar, then click it while on grok.com/library.
+The bookmark runs on [https://grok.com/library](https://grok.com/library) using the logged-in session. It lists media with the same request the Imagine library uses:
 
-## Features
-- 9:16 vertical grid optimized for Reels content
-- Search by prompt
-- Image / Video filter
-- Multi-select + download selected files
-- Works entirely in the browser with your existing login session
+`GET /rest/assets?pageSize=40&orderBy=ORDER_BY_CREATE_TIME&workspaceKind=WORKSPACE_KIND_IMAGINE_ALL&mimeTypes=image/jpeg&mimeTypes=image/png&mimeTypes=image/webp&mimeTypes=video/mp4`
 
-Source files:
-- `index.html` — install page
-- `bookmarklet.js` — the bookmarklet source
+Related videos are grouped into a cycle row when the post record has `originalPostId` or the assets share `rootAssetId`. Selection is only for download. Playback does not require a click.
+
+A bookmark is a copy of the script at the moment you drag it. After each update, delete the old bookmark and drag the button from the install page again. The header must say **Reels Library v3**.
