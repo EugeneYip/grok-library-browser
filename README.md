@@ -10,4 +10,4 @@ The bookmark runs on [https://grok.com/library](https://grok.com/library) using 
 
 Related videos are grouped into a cycle row when the post record has `originalPostId` or the assets share `rootAssetId`. Selection is only for download. Playback does not require a click.
 
-The header must say **Reels Library v4**. Video tiles use Grok’s preview image when it exists, and otherwise show a still frame from the file so you can select without opening each one. Hover a video to play it.
+The header must say **Reels Library v5**. Search uses the generation prompt, which is loaded from each asset after the grid appears. Video tiles show a still image and play on hover.

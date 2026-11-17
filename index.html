@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Grok Reels Library v4</title>
+<title>Grok Reels Library v5</title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.5; color: #111; }
   h1 { font-size: 1.6rem; }
@@ -16,28 +16,29 @@
 </style>
 </head>
 <body>
-<h1>Grok Reels Library v4</h1>
+<h1>Grok Reels Library v5</h1>
 <p>Full-screen 9:16 scan of your Imagine images and videos. Runs in Safari on grok.com. No extension.</p>
 
 <div class="note">
-  <strong>Replace the old bookmark.</strong> The copy on your bar does not update by itself. Delete <strong>Reels Library v3</strong> (or any older Reels Library bookmark), hard-refresh this page, then drag <strong>Reels Library v4</strong>. The green label in the overlay must say v4.
+  <strong>Replace the old bookmark.</strong> The copy on your bar does not update by itself. Delete the old Reels Library bookmark, hard-refresh this page, then drag <strong>Reels Library v5</strong>. The green label must say v5.
 </div>
 
 <h2>1. Drag this to the bookmarks bar</h2>
-<p id="load-state">Loading the v4 bookmark…</p>
-<a class="bookmarklet" id="install-link" href="#">Reels Library v4</a>
+<p id="load-state">Loading the v5 bookmark…</p>
+<a class="bookmarklet" id="install-link" href="#">Reels Library v5</a>
 
 <div class="ok">
   <strong>Safari:</strong> View → Show Bookmarks Bar (⌘⇧B).<br>
-  If a bookmark named “Reels Library” is already there, delete it, then drag <strong>Reels Library v4</strong>.
+  If a bookmark named “Reels Library” is already there, delete it, then drag <strong>Reels Library v5</strong>.
 </div>
 
 <h2>2. Open your library and click the new bookmark</h2>
 <ol>
   <li>Log in and open <a href="https://grok.com/library">https://grok.com/library</a>.</li>
-  <li>Click <strong>Reels Library v4</strong>.</li>
-  <li>The header must say <strong>Reels Library v4</strong> in green. If it still says v3, you clicked the old bookmark.</li>
-  <li>Images and videos fill the screen as pages load. Video tiles show a still so you can tell them apart. Hover a video to play it. You do not open each item to see it.</li>
+  <li>Click <strong>Reels Library v5</strong>.</li>
+  <li>The header must say <strong>Reels Library v5</strong> in green. If it still says v4, you clicked the old bookmark.</li>
+  <li>Search matches the generation prompt. The first search can take a moment while those prompts load. The status line shows the progress.</li>
+  <li>Video tiles use a still image. Hover one to play it.</li>
   <li>A row labeled “in this cycle” is one image plus the videos made from it, side by side. Everything else sits in the 9:16 grid under that.</li>
   <li>Click to select. Double-click to open the file. Download selected saves the files in the browser.</li>
 </ol>
@@ -53,15 +54,15 @@
     .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
     .then(function (src) {
       var code = src.replace(/^\uFEFF/, '').replace(/^\/\/.*\n/, '').trim();
-      if (code.indexOf('Reels Library') < 0 || code.indexOf('preview-image-256') < 0) {
-        throw new Error('script did not look like v4');
+      if (code.indexOf('Reels Library') < 0 || code.indexOf('mediaGenInput') < 0) {
+        throw new Error('script did not look like v5');
       }
       link.href = 'javascript:' + encodeURIComponent(code);
-      link.textContent = 'Reels Library v4';
-      state.textContent = 'Ready. Drag “Reels Library v4” onto the bookmarks bar.';
+      link.textContent = 'Reels Library v5';
+      state.textContent = 'Ready. Drag “Reels Library v5” onto the bookmarks bar.';
     })
     .catch(function (err) {
-      link.textContent = 'Could not load v4';
+      link.textContent = 'Could not load v5';
       state.textContent = 'The install script failed (' + err.message + '). Hard-refresh this page (⌘⇧R) and try again.';
     });
 </script>

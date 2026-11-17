@@ -1,4 +1,4 @@
-// v4 — video stills from preview-image keys, then a decoded frame.
+// v5 — prompt search from mediaGenInput, still previews without decoding every video.
 (function () {
   if (window.__grokReelsLoading && document.getElementById('grok-reels-fullscreen')) return;
   window.__grokReelsLoading = true;
@@ -55,7 +55,8 @@
       aux['preview-image'],
       aux.preview_image,
       aux.thumbnail,
-      aux.thumbnailImageUrl
+      aux.thumbnailImageUrl,
+      asset.workspaceSharingPreviewImageKey
     ];
     var k;
     for (k in aux) {
@@ -73,6 +74,53 @@
     return out;
   }
 
+  function addText(list, value) {
+    if (typeof value !== 'string') return;
+    var text = value.trim();
+    if (text) list.push(text);
+  }
+
+  function promptOf(asset) {
+    var list = [];
+    var aux = (asset && asset.auxKeys) || {};
+    addText(list, aux.original_prompt);
+    addText(list, aux.video_original_prompt);
+    addText(list, aux.prompt);
+    addText(list, asset && asset.summary);
+    addText(list, asset && asset.name);
+    var gen = asset && asset.mediaGenInput;
+    var found = !!(aux.original_prompt || aux.video_original_prompt || aux.prompt);
+    if (gen && typeof gen === 'object') {
+      Object.keys(gen).forEach(function (key) {
+        var branch = gen[key];
+        if (branch && typeof branch === 'object' && branch.prompt) {
+          addText(list, branch.prompt);
+          found = true;
+        }
+      });
+    }
+    var seen = {};
+    var unique = [];
+    list.forEach(function (line) {
+      var k = line.toLowerCase();
+      if (seen[k]) return;
+      seen[k] = 1;
+      unique.push(line);
+    });
+    return { text: unique.join('\n'), found: found };
+  }
+
+  function applyAsset(item, asset) {
+    var info = promptOf(asset);
+    if (info.text) item.text = info.text;
+    if (info.found) item.needsPrompt = false;
+    var posters = postersFrom(asset);
+    if (posters.length) {
+      item.posters = posters;
+      item.poster = posters[0];
+    }
+  }
+
   function addAsset(asset) {
     if (!asset || asset.isDeleted || !asset.assetId) return;
     var kind = kindOf(asset);
@@ -80,13 +128,15 @@
     if (!kind || !url) return;
     if (byId[asset.assetId]) return;
     var posters = postersFrom(asset);
+    var info = promptOf(asset);
     var item = {
       id: asset.assetId,
       kind: kind,
       url: url,
       poster: posters[0] || '',
       posters: posters,
-      text: asset.summary || asset.name || '',
+      text: info.text,
+      needsPrompt: !info.found,
       time: asset.createTime || asset.lastUseTime || '',
       root: asset.rootAssetId || asset.assetId,
       parentId: '',
@@ -119,7 +169,7 @@
     var mode = ui.filter ? ui.filter.value : 'all';
     var visible = items.filter(function (it) {
       if (mode !== 'all' && it.kind !== mode) return false;
-      if (q && (it.text || '').toLowerCase().indexOf(q) === -1 && it.id.indexOf(q) === -1) return false;
+      if (q && (it.text || '').toLowerCase().indexOf(q) === -1 && it.id.toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
     var map = {};
@@ -176,6 +226,7 @@
             enqueueFrame(card);
           }
         };
+        poster.onload = function () { poster.classList.add('show'); };
         poster.src = it.poster;
         card.appendChild(poster);
       }
@@ -183,7 +234,7 @@
       badge.className = 'badge';
       badge.textContent = 'VIDEO';
       card.appendChild(badge);
-      if (io) io.observe(card);
+      if (io && !it.poster && !it.needsPrompt) io.observe(card);
       card.onmouseenter = function () { playCard(card); };
       card.onmouseleave = function () { pauseCard(card); };
     } else {
@@ -250,8 +301,14 @@
     }
     rendered = g.shown;
     if (items.length) {
+      var q = (ui.search && ui.search.value || '').trim();
+      var pending = 0;
+      items.forEach(function (it) { if (it.needsPrompt) pending++; });
       var extra = g.multi.length ? (g.multi.length + ' cycles \u00b7 ') : '';
-      setStatus('v4 \u00b7 ' + extra + g.shown + (g.shown !== items.length ? ' of ' + items.length : '') + ' shown. Scroll to scan. Hover a video to play.');
+      var tail = q ? (g.shown + ' matches') : (g.shown + ' shown');
+      if (q && pending) tail += ' \u00b7 still reading prompts ' + (items.length - pending) + '/' + items.length;
+      else tail += '. Scroll to scan. Hover a video to play.';
+      setStatus('v5 \u00b7 ' + extra + tail);
     }
   }
 
@@ -286,7 +343,7 @@
   }
 
   function pumpFrames() {
-    while (frameActive < 3 && frameQueue.length) {
+    while (frameActive < 2 && frameQueue.length) {
       var card = frameQueue.shift();
       if (!card || !card.isConnected || card.querySelector('img.poster')) {
         if (card) card.dataset.queued = '';
@@ -366,19 +423,21 @@
       '#grok-reels-fullscreen .strip .tile{width:148px;flex:0 0 148px}',
       '#grok-reels-fullscreen .tile.on{outline:3px solid #4ade80;outline-offset:-3px}',
       '#grok-reels-fullscreen .tile img,#grok-reels-fullscreen .tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#141414}',
-      '#grok-reels-fullscreen .tile img{z-index:1}',
+      '#grok-reels-fullscreen .tile img{z-index:1;opacity:1}',
+      '#grok-reels-fullscreen .tile img.poster{opacity:0;transition:opacity .18s linear}',
+      '#grok-reels-fullscreen .tile img.poster.show{opacity:1}',
       '#grok-reels-fullscreen .tile video{z-index:0}',
       '#grok-reels-fullscreen .tile.framed video,#grok-reels-fullscreen .tile.playing video{z-index:2}',
       '#grok-reels-fullscreen .badge{position:absolute;top:6px;right:6px;z-index:3;background:rgba(0,0,0,.7);font-size:10px;font-weight:700;padding:2px 5px;border-radius:4px}',
       '#grok-reels-fullscreen .check{position:absolute;top:6px;left:6px;z-index:3;width:18px;height:18px;border:2px solid #fff;border-radius:4px;background:rgba(0,0,0,.4);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}',
       '#grok-reels-fullscreen .tile.on .check{background:#4ade80;border-color:#4ade80;color:#041}',
       '</style>',
-      '<header><h2>Reels Library <span class="v">v4</span></h2>',
-      '<input id="grb-search" placeholder="Filter by name or prompt">',
+      '<header><h2>Reels Library <span class="v">v5</span></h2>',
+      '<input id="grb-search" placeholder="Search prompts">',
       '<select id="grb-filter"><option value="all">All</option><option value="video">Video</option><option value="image">Image</option></select>',
       '<button id="grb-dl" type="button" disabled>Download selected (0)</button>',
       '<button class="x" type="button">\u00d7</button></header>',
-      '<div class="status" id="grb-status">v4 \u00b7 loading your Imagine library\u2026</div>',
+      '<div class="status" id="grb-status">v5 \u00b7 loading your Imagine library\u2026</div>',
       '<div class="debug" id="grb-debug"></div>',
       '<div class="board" id="grb-board"></div>'
     ].join('');
@@ -393,7 +452,10 @@
       window.__grokReelsLoading = false;
       overlay.remove();
     };
-    ui.search.oninput = render;
+    ui.search.oninput = function () {
+      clearTimeout(ui.searchTimer);
+      ui.searchTimer = setTimeout(render, 160);
+    };
     ui.filter.onchange = render;
     ui.download.onclick = downloadSelected;
     document.addEventListener('keydown', function esc(ev) {
@@ -423,7 +485,7 @@
       raw += assets.length;
       assets.forEach(addAsset);
       if (items.length !== rendered) render();
-      setStatus('v4 \u00b7 ' + feed.name + ' \u00b7 ' + items.length + ' media');
+      setStatus('v5 \u00b7 ' + feed.name + ' \u00b7 ' + items.length + ' media');
       token = (page.json && page.json.nextPageToken) || '';
       pages++;
       if (pages >= 80) break;
@@ -454,8 +516,13 @@
         if (!item) return;
         if (p.originalPostId && p.originalPostId !== id) { item.parentId = p.originalPostId; linked++; }
         var prompt = p.prompt || p.originalPrompt || '';
-        if (prompt) item.text = prompt;
-        if (!item.poster && p.thumbnailImageUrl) item.poster = mediaUrl(p.thumbnailImageUrl);
+        if (prompt && (item.text || '').toLowerCase().indexOf(prompt.toLowerCase()) < 0) {
+          item.text = prompt + (item.text ? '\n' + item.text : '');
+        }
+        if (!item.poster && p.thumbnailImageUrl) {
+          item.poster = mediaUrl(p.thumbnailImageUrl);
+          item.posters = [item.poster];
+        }
       });
     }
     if (linked) render();
@@ -491,7 +558,7 @@
       } catch (e) {}
     }
     paintSelect();
-    setStatus('v4 \u00b7 if Safari saved only one file, allow multiple downloads for grok.com (Safari \u2192 Settings \u2192 Websites \u2192 Downloads).');
+    setStatus('v5 \u00b7 if Safari saved only one file, allow multiple downloads for grok.com (Safari \u2192 Settings \u2192 Websites \u2192 Downloads).');
   }
 
   async function main() {
@@ -509,7 +576,7 @@
       }
     }
     if (!items.length) {
-      setStatus('v4 \u00b7 no images or videos came back.');
+      setStatus('v5 \u00b7 no images or videos came back.');
       ui.debug.className = 'debug on';
       setDebug(notes.filter(Boolean).join('\n'));
       window.__grokReelsLoading = false;
@@ -518,15 +585,76 @@
     setDebug('');
     ui.debug.className = 'debug';
     render();
-    setStatus('v4 \u00b7 ' + items.length + ' media via ' + used + '. Linking image + video cycles\u2026');
+    setStatus('v5 \u00b7 ' + items.length + ' media via ' + used + '. Linking image + video cycles\u2026');
     try { await linkCycles(); } catch (e) {}
     render();
     window.__grokReelsLoading = false;
+    hydratePrompts();
+  }
+
+  function patchPoster(item) {
+    if (!ui.board || !item.poster) return;
+    var card = ui.board.querySelector('.tile[data-id="' + item.id + '"]');
+    if (!card || card.querySelector('img.poster')) return;
+    var img = document.createElement('img');
+    img.className = 'poster';
+    img.alt = '';
+    img.onload = function () { img.classList.add('show'); };
+    img.onerror = function () { img.remove(); enqueueFrame(card); };
+    img.src = item.poster;
+    card.appendChild(img);
+  }
+
+  async function hydratePrompts() {
+    var pending = items.filter(function (it) { return it.needsPrompt; });
+    if (!pending.length) return;
+    var cursor = 0;
+    var updated = 0;
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    async function one(item) {
+      var wait = 500;
+      for (var attempt = 0; attempt < 4; attempt++) {
+        var page = await getJson(API + '/' + encodeURIComponent(item.id), {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Accept: 'application/json' }
+        });
+        if (page.status === 429 || page.status >= 500) { await sleep(wait); wait *= 2; continue; }
+        item.needsPrompt = false;
+        var asset = page.json && (page.json.asset || page.json);
+        if (page.ok && asset && typeof asset === 'object') applyAsset(item, asset);
+        return;
+      }
+      item.needsPrompt = false;
+    }
+    async function worker() {
+      while (cursor < pending.length) {
+        var item = pending[cursor++];
+        try { await one(item); } catch (e) { item.needsPrompt = false; }
+        updated++;
+        if (item.poster) patchPoster(item);
+        else if (io && ui.board) {
+          var card = ui.board.querySelector('.tile[data-id="' + item.id + '"]');
+          if (card && !card.querySelector('img.poster')) io.observe(card);
+        }
+        var q = ui.search && ui.search.value.trim();
+        if (q && (updated % 4 === 0 || updated === pending.length)) render();
+        else if (!q && (updated % 24 === 0 || updated === pending.length)) {
+          setStatus(updated === pending.length
+            ? 'v5 \u00b7 ' + items.length + ' media. Prompts are ready to search.'
+            : 'v5 \u00b7 reading prompts ' + updated + '/' + pending.length);
+        }
+      }
+    }
+    var jobs = [];
+    for (var n = 0; n < 4; n++) jobs.push(worker());
+    try { await Promise.all(jobs); } catch (e) {}
+    if (ui.search && ui.search.value.trim()) render();
   }
 
   main().catch(function (err) {
     window.__grokReelsLoading = false;
-    setStatus('v4 \u00b7 failed');
+    setStatus('v5 \u00b7 failed');
     if (ui.debug) { ui.debug.className = 'debug on'; setDebug(String(err && err.message || err)); }
   });
 })();
